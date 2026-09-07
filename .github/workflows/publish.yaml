@@ -3,6 +3,8 @@ name: Publish Package
 on:
   push:
     branches: [main]
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:
@@ -22,12 +24,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Setup
-        uses: ./.github/actions/setup
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-fund --no-audit
 
       - name: Lint & Typecheck
         run: |
@@ -35,12 +41,12 @@ jobs:
           npm run typecheck --if-present
 
       - name: Test
-        run: npm test
+        run: npm test --if-present
 
       - name: Build
         run: npm run build
 
-      # Guard against ever re-shipping the "dist missing" class of bug.
+      # Guard against the "dist missing" class of bugs
       - name: Verify dist/cli/index.js exists
         run: |
           if [ ! -f dist/cli/index.js ]; then
@@ -67,7 +73,7 @@ jobs:
 
   publish:
     needs: build
-    # Set to `true` to auto-publish on every push to main, or leave as-is for manual-only releases.
+    # Runs on every push to main + manual + tags (same as the working simple workflow)
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -75,61 +81,50 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - registry: https://npm.pkg.github.com
-            package_name: "@idmdakhi/gitwe"
-            token_secret: GITHUB_TOKEN
-            use_oidc: false
-            provenance: false
+          # Official npm registry – scoped package (OIDC)
           - registry: https://registry.npmjs.org
             package_name: "@idmdakhi/gitwe"
-            token_secret: NPM_TOKEN
             use_oidc: true
-            provenance: true
+
+          # Official npm registry – unscoped package (OIDC)
           - registry: https://registry.npmjs.org
             package_name: "gitwe-ts"
-            token_secret: NPM_TOKEN
             use_oidc: true
-            provenance: true
+
+          # GitHub Packages (token-based)
+          - registry: https://npm.pkg.github.com
+            package_name: "@idmdakhi/gitwe"
+            use_oidc: false
 
     permissions:
       contents: read
-      id-token: write
+      id-token: write # required for OIDC
       packages: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: ${{ matrix.registry }}
-          cache: npm
+          # Do NOT enable cache here for publish jobs
 
-      # --- FIX: actions/setup-node unconditionally writes
-      # //<registry>/:_authToken=${NODE_AUTH_TOKEN} into .npmrc, even when we
-      # never set NODE_AUTH_TOKEN. With OIDC trusted publishing that env var
-      # is intentionally unset, so the placeholder resolves to an EMPTY
-      # string — npm then sees "an authToken is configured", skips the OIDC
-      # exchange entirely, and fails with ENEEDAUTH/E404. Stripping the empty
-      # line lets npm fall through to its OIDC trusted-publisher flow.
-      # See: https://github.com/actions/setup-node/issues/1551
-      #      https://github.com/npm/documentation/issues/1960
+      # Critical fix for OIDC trusted publishing
+      # setup-node always writes an empty //registry/:_authToken= line.
+      # That empty token makes npm skip the OIDC exchange and fail with ENEEDAUTH.
       - name: Remove empty authToken line (let OIDC take over)
         if: matrix.use_oidc
         run: |
-          set -x
-          echo "NPM_CONFIG_USERCONFIG=${NPM_CONFIG_USERCONFIG:-<unset>}"
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           touch "$npmrc"
-          echo "--- npmrc before ---"
-          cat "$npmrc"
           sed -i '/_authToken=$/d' "$npmrc"
-          echo "--- npmrc after ---"
+          echo "--- cleaned .npmrc ---"
           cat "$npmrc"
 
-      - name: Ensure npm supports OIDC trusted publishing
+      - name: Ensure latest npm (OIDC support)
         if: matrix.use_oidc
         run: npm install -g npm@latest
 
@@ -149,17 +144,17 @@ jobs:
       - name: Set package name
         run: npm pkg set name="${{ matrix.package_name }}"
 
-      - name: Publish (OIDC / npm)
+      # ---------- Publish ----------
+      - name: Publish (OIDC / npmjs)
         if: matrix.use_oidc
-        run: npm publish --access public
-        # No NODE_AUTH_TOKEN here on purpose — auth comes from OIDC.
-        # Requires a Trusted Publisher configured on npmjs.com for THIS
-        # exact package name + repo + workflow file path. Since this job
-        # publishes two different package names, both need their own
-        # Trusted Publisher entry.
+        run: npm stage publish
+        # Intentionally NO NODE_AUTH_TOKEN.
+        # Auth is done via OIDC Trusted Publisher.
+        # You must configure a Trusted Publisher on npmjs.com for EACH package name
+        # (repo + workflow file path).
 
       - name: Publish (token / GitHub Packages)
         if: ${{ !matrix.use_oidc }}
         run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets[matrix.token_secret] }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
