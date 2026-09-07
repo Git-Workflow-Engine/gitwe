@@ -30,7 +30,9 @@ Inspired by the original [`nvie/gitflow`](https://github.com/nvie/gitflow), [`gi
 ### Installation
 
 ```bash
-npm install -g gitwe
+npm install -g gitwe-ts
+# OR
+npm install -g @idmdakhi/gitwe
 ```
 
 Or run it without installing via `npx`:
