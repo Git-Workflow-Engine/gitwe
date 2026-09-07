@@ -2,8 +2,8 @@
 
 **Configurable Git branching-workflow engine.**
 
-[![npm version](https://img.shields.io/npm/v/gitwe)](https://www.npmjs.com/package/gitwe-ts)
-[![npm version](https://img.shields.io/npm/v/gitwe)](https://www.npmjs.com/package/@idmdakhi/gitwe)
+[![npm version](https://img.shields.io/npm/v/gitwe-ts)](https://www.npmjs.com/package/gitwe-ts)
+[![npm version](https://img.shields.io/npm/v/@idmdakhi/gitwe)](https://www.npmjs.com/package/@idmdakhi/gitwe)
 [![Node.js CI](https://github.com/idmdakhi/gitwe/actions/workflows/ci.yaml/badge.svg)](https://github.com/idmdakhi/gitwe/actions/workflows/ci.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
