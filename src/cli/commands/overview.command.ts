@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { loadEngine, action } from "./shared.js";
 import { style } from "../output.js";
+import { toArray } from "../../utils.js";
 
 export function overviewCommand(): Command {
   return new Command("overview")
@@ -22,7 +23,7 @@ export function overviewCommand(): Command {
           ...overview.branchTypes.map(
             (t) =>
               `  ${style.cyan(t.type.padEnd(10))} base=${t.base.padEnd(10)} ` +
-              `target=[${t.target.join(", ")}]  count=${t.count}`,
+              `target=[${toArray(t.target as string[])}]  count=${t.count}`,
           ),
         ];
 

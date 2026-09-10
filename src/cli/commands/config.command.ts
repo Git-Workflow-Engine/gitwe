@@ -6,7 +6,7 @@ import {
   EditBaseOptions,
   EditBranchTypeOptions,
 } from "../../domain/services/config-editor.service.js";
-import { omitUndefined, parseCsv } from "../../utils.js";
+import { omitUndefined, parseCsv, toArray } from "../../utils.js";
 
 // ---- root config command -------------------------------------------------
 export function configCommand(): Command {
@@ -36,7 +36,7 @@ export function configCommand(): Command {
             "Branch types:",
             ...config.branchTypes.map(
               (t) =>
-                `  ${t.name} (prefix: ${t.prefix}, base: ${t.base}, target: ${t.target.join(", ")})`,
+                `  ${t.name} (prefix: ${t.prefix}, base: ${t.base}, target: ${toArray(t.target as string[])})`,
             ),
           ],
         });
