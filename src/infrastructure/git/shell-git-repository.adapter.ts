@@ -105,13 +105,35 @@ export class ShellGitRepository implements GitRepository {
     return branch === "" ? undefined : branch;
   }
 
+  /**
+   * List local branch names matching `pattern` (git glob relative to refs/heads).
+   *
+   * IMPORTANT: in `git for-each-ref`, `*` does NOT match `/`. So `refs/heads/*`
+   * only returns top-level branches (main, develop) and misses `feature/foo`.
+   * That made `gitwe list` return empty while `gitwe overview` still counted
+   * topic branches via patterns like `feature/*`.
+   *
+   * - `*` / empty  → walk the whole `refs/heads` namespace
+   * - `feature/*`  → walk `refs/heads/feature` (all nested names under that prefix)
+   * - anything else → pass through as a single for-each-ref pattern
+   */
   async listBranches(pattern = "*"): Promise<string[]> {
-    const out = await this.run([
-      "for-each-ref",
-      "--format=%(refname:short)",
-      `refs/heads/${pattern}`,
-    ]);
-    return out.length ? out.split("\n") : [];
+    const ref =
+      !pattern || pattern === "*"
+        ? "refs/heads"
+        : pattern.endsWith("/*")
+          ? `refs/heads/${pattern.slice(0, -2)}`
+          : `refs/heads/${pattern}`;
+
+    const out = await this.run(["for-each-ref", "--format=%(refname:short)", ref]);
+    const names = out.length ? out.split("\n").filter(Boolean) : [];
+
+    // For "feature/*" we walked the namespace; keep only names under that prefix.
+    if (pattern && pattern !== "*" && pattern.endsWith("/*")) {
+      const prefix = pattern.slice(0, -1); // "feature/"
+      return names.filter((n) => n.startsWith(prefix) && n.length > prefix.length);
+    }
+    return names;
   }
 
   async branchExists(branch: string): Promise<boolean> {
