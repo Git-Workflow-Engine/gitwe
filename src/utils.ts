@@ -40,7 +40,7 @@ export function parseCsv(value: string): string[] {
 }
 
 export function toArray(
-  target: string | string[] | null | undefined,
+  target: string | readonly string[] | null | undefined,
   delimiter: string = ", ",
 ): string[] {
   if (Array.isArray(target)) return [...target];
@@ -59,7 +59,7 @@ export function toArray(
 }
 
 export function toString(
-  target: string | string[] | null | undefined,
+  target: string | readonly string[] | null | undefined,
   delimiter: string = ", ",
 ): string {
   if (Array.isArray(target)) return target.join(delimiter);
