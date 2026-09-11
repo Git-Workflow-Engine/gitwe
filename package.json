@@ -1,6 +1,6 @@
 {
   "name": "gitwe",
-  "version": "0.35.8",
+  "version": "0.37.0",
   "description": "A configurable git branching-workflow engine — define your workflow once, let gitwe run it.",
   "type": "module",
   "license": "MIT",

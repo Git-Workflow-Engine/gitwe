@@ -12,20 +12,29 @@ baseBranches:
 
 branchTypes:
   - name: feature
-    aliases: [feat]
+    aliases: [feat, ftr]
     base: develop
     target: [develop]
     prefix: feature/
+
   - name: release
-    aliases: [rel]
+    aliases: [rels, rls]
     base: develop
     target: [main, develop]
     prefix: release/
+
   - name: hotfix
-    aliases: [fix]
+    aliases: [fix, hf]
     base: main
     target: [main, develop]
-    prefix: hotfix/
+    prefix: fix/
+
+  - name: bugfix
+    aliases: [bug, bf]
+    base: develop
+    target: [develop]
+    prefix: bug/
+
   - name: support
     aliases: [lts]
     base: main

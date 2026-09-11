@@ -1,6 +1,10 @@
 # .gitwe/version.yaml
 version: 1
 
+currentVersion: "0.1.0"
+
+tagSource: [branch, file, tag, manual, error]
+
 tagTypes: [release, hotfix]
 tagTargets: [root] # root = no base on baseBranches
 tagPrefix: v
@@ -24,4 +28,19 @@ prerelease:
   format: "{{type}}.{{number}}"
   types: ["alpha", "beta", "rc"]
 
-initialVersion: "1.0.0"
+targets:
+  - file: package.json
+    path: version
+  - file: src/version.ts
+    pattern: "export const version = '{{version}}';"
+
+branchVersion:
+  patterns:
+    - "release/v{{version}}" # release/v0.35.2
+    - "release/{{version}}" # release/0.35.2
+    - "hotfix/v{{version}}" # hotfix/v0.35.3
+    - "hotfix/{{version}}" # hotfix/0.35.3
+    # - "v{{version}}" # v0.35.2
+    # - "{{version}}" # 0.35.2
+  stripPrefix: true
+  overrideBumpRules: true

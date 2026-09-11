@@ -48,6 +48,15 @@ export class VersionConfigLoader {
 
     merged.tagTypes = merged.tagTypes ?? [];
     merged.tagTargets = merged.tagTargets ?? [];
+    merged.targets = merged.targets ?? [];
+    merged.branchVersion = {
+      enabled: false,
+      patterns: [],
+      fallback: "bumpRules",
+      stripPrefix: true,
+      overrideBumpRules: false,
+      ...merged.branchVersion,
+    };
 
     return merged;
   }
