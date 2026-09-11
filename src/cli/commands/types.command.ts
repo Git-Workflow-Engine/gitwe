@@ -11,8 +11,8 @@ export function typesCommand(): Command {
         name: t.name,
         prefix: t.prefix,
         base: t.base,
-        target: [...t.target],
-        aliases: t.aliases ? [...t.aliases] : [],
+        target: toArray(t.target),
+        aliases: toArray(t.aliases),
       }));
 
       const data = { types };
