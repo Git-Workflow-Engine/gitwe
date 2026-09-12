@@ -1,0 +1,11 @@
+# .gitwe/changelog.template
+# قالبِ خطِ هر کامیت در چنج‌لاگ. برای هر کامیت یک خط تولید می‌شود.
+#
+# پلیس‌هولدرهای در دسترس:
+#   {{subject}}    متن کامیت، بدون پیشوند "type(scope):"
+#   {{scope}}      بخش "(scope)" از یک conventional commit؛ اگر نبود، خالی است
+#   {{shortHash}}  هش کوتاه کامیت (۷ کاراکتر)
+#   {{hash}}       هش کامل کامیت
+#   {{author}}     نام نویسنده‌ی کامیت
+
+- **{{scope}}:** {{subject}} ([{{shortHash}}](https://github.com/OWNER/REPO/commit/{{hash}}))

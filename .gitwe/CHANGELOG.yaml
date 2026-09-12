@@ -2,5 +2,23 @@
 version: 1
 
 enabled: false
+file: CHANGELOG.md
 template:
   path: ".gitwe/changelog.template"
+
+autoCommit: true
+
+commitTypes:
+  feat: Added
+  fix: Fixed
+  perf: Performance
+  revert: Reverted
+  docs: Documentation
+  # chore:
+
+breakingChangeHeading: "Breaking Changes"
+
+template:
+  path: ".gitwe/changelog.template"
+  # پیش‌فرض داخلی اگه فایل نبود: "- {{subject}} ({{shortHash}})"
+  # پلیس‌هولدرهای در دسترس: {{subject}} {{scope}} {{shortHash}} {{hash}} {{author}}
