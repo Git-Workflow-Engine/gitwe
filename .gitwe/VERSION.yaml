@@ -7,13 +7,13 @@ currentVersion: "1.0.0"
 # baseline for a release; the first one that resolves a value wins.
 # Defaults to [branch, tag]. Ignored when --current-version is passed on
 # the CLI.
-# tagSource: [branch, config, tag, manual, error]
+tagSource: [branch, config, tag, manual, error]
 
 tagTypes: [release, hotfix]
 tagTargets: [root] # root = no base on baseBranches
 
 tagPrefix: v
-format: "{{tagPrefix}}{{major}}.{{minor}}.{{patch}}" # {{#if prerelease}}-{{prerelease}}{{/if}}"
+format: "{{tagPrefix}}{{major}}.{{minor}}.{{patch}}{{#if prerelease}}-{{prerelease}}{{/if}}"
 
 annotated: true
 autoCommit: true
@@ -33,20 +33,20 @@ bumpRules:
     types: ["alpha", "beta", "rc"]
 
 # Files to update (in addition to the git tag) whenever the version bumps.
-# targetVersion:
-#   - file: package.json
-#     path: version # dot-notation JSON key path
-#   - file: src/version.ts
-#     pattern: "export const version = '{{version}}';"
+targetVersion:
+  - file: package.json
+    path: version # dot-notation JSON key path
+  - file: src/version.ts
+    pattern: "export const version = '{{version}}';"
 
 # Only consulted when "branch" appears in `tagSource` above.
-# branchVersion:
-#   patterns:
-#     - "release/v{{version}}" # release/v0.35.2
-#     - "release/{{version}}" # release/0.35.2
-#     - "hotfix/v{{version}}" # hotfix/v0.35.3
-#     - "hotfix/{{version}}" # hotfix/0.35.3
-#     - "v{{version}}" # v0.35.2
-#     - "{{version}}" # 0.35.2
-#   stripPrefix: true
-#   overrideBumpRules: true
+branchVersion:
+  patterns:
+    - "release/v{{version}}" # release/v0.35.2
+    - "release/{{version}}" # release/0.35.2
+    - "hotfix/v{{version}}" # hotfix/v0.35.3
+    - "hotfix/{{version}}" # hotfix/0.35.3
+    - "v{{version}}" # v0.35.2
+    - "{{version}}" # 0.35.2
+  stripPrefix: true
+  overrideBumpRules: true
