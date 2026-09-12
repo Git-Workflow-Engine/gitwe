@@ -59,7 +59,7 @@ export interface BranchVersionConfig {
  *  - "error": stop and fail immediately, instead of falling through to the
  *    `versioning.currentVersion` seed / timestamp fallback.
  */
-export type CurrentVersionSource = "branch" | "config" | "tag" | "manual" | "error";
+export type TagSource = "branch" | "config" | "tag" | "manual" | "error";
 
 /**
  * Governs prerelease (`-alpha.1`, `-beta.2`, ...) bumps. Lives at
@@ -103,10 +103,10 @@ export interface VersioningConfig {
   /**
    * Ordered list of strategies gitwe tries to determine the "current
    * version" baseline for a release; the first one that resolves a value
-   * wins. Defaults to `["branch", "tag"]`. See {@link CurrentVersionSource}.
+   * wins. Defaults to `["branch", "tag"]`. See {@link TagSource}.
    * Ignored when `--current-version` is passed explicitly on the CLI.
    */
-  tagSource?: readonly CurrentVersionSource[];
+  tagSource?: readonly TagSource[];
   /** Files to update (in addition to the tag) whenever the version is bumped. */
   targetVersion?: readonly VersionTargetConfig[];
   /** Extract the release version from the branch name instead of/alongside bumpRules. */
