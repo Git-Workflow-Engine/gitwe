@@ -12,10 +12,10 @@ tagTypes:
 tagTargets:
   - root
 tagPrefix: v
-format: "{{tagPrefix}}{{major}}.{{minor}}.{{patch}}{{#if prerelease}}-{{prerelease}}{{/if}}"
+format: '{{tagPrefix}}{{major}}.{{minor}}.{{patch}}{{#if prerelease}}-{{prerelease}}{{/if}}'
 annotated: true
 autoCommit: true
-commitMessage: "chore: bump version to {{version}}"
+commitMessage: 'chore: bump version to {{version}}'
 sign: false
 pushTags: false
 bumpRules:
@@ -27,7 +27,7 @@ bumpRules:
   prerelease:
     enabled: false
     branchType: []
-    format: "{{type}}.{{number}}"
+    format: '{{type}}.{{number}}'
     types:
       - alpha
       - beta
@@ -44,6 +44,6 @@ branchVersion:
     - hotfix/v{{version}}
     - hotfix/{{version}}
     - v{{version}}
-    - "{{version}}"
+    - '{{version}}'
   stripPrefix: true
   overrideBumpRules: true
