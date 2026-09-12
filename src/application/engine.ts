@@ -29,6 +29,7 @@ import {
   EditBranchTypeOptions,
 } from "../domain/services/config-editor.service.js";
 import { VersionConfigLoader } from "../infrastructure/config/version-config-loader.js";
+import { ChangelogConfigLoader } from "../infrastructure/config/changelog-config-loader.js";
 import { RemoteConfigLoader } from "../infrastructure/config/remote-config-loader.js";
 import { HookConfigLoader } from "../infrastructure/config/hook-config-loader.js";
 import { FileHookRunner } from "../infrastructure/hooks/file-hook-runner.adapter.js";
@@ -70,6 +71,12 @@ export class Engine {
       mainConfig: config,
     });
 
+    const changelogLoader = new ChangelogConfigLoader();
+    const changelog = await changelogLoader.load({
+      root: deps.git.cwd,
+      mainConfig: config,
+    });
+
     const remoteLoader = new RemoteConfigLoader();
     const remote = await remoteLoader.load({
       root: deps.git.cwd,
@@ -89,13 +96,8 @@ export class Engine {
       !!deps.logger, // یا از options.verbose استفاده کنید
     );
 
-    const workflow = new WorkflowService({ ...config, versioning, remote, hooks: hookConfig });
-    return new Engine(workflow, {
-      logger: silentLogger,
-      prompter: noopVersionPrompter,
-      ...deps,
-      hooks,
-    });
+    const workflow = new WorkflowService({ ...config, versioning, changelog, remote, hooks: hookConfig });
+    return new Engine(workflow, { logger: silentLogger, prompter: noopVersionPrompter, ...deps, hooks });
   }
 
   static async init(deps: EngineDeps, options: InitEngineOptions): Promise<Engine> {
@@ -106,11 +108,7 @@ export class Engine {
       force: options.force,
       createBranches: options.createBranches,
     });
-    return new Engine(new WorkflowService(config), {
-      logger: silentLogger,
-      prompter: noopVersionPrompter,
-      ...deps,
-    });
+    return new Engine(new WorkflowService(config), { logger: silentLogger, prompter: noopVersionPrompter, ...deps });
   }
   /** Optional helper for older call sites that only pass a preset name. */
   static async initFromPreset(

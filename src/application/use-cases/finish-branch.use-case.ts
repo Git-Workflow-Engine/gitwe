@@ -11,7 +11,13 @@ import {
 } from "../../domain/services/version-calculator.service.js";
 import { BranchVersionResolverService } from "../../domain/services/branch-version-resolver.service.js";
 import { VersionTargetsService } from "../../domain/services/version-targets.service.js";
+import {
+  ChangelogGeneratorService,
+  DEFAULT_CHANGELOG_LINE_TEMPLATE,
+  type ChangelogCommit,
+} from "../../domain/services/changelog-generator.service.js";
 import type { VersioningConfig } from "../../domain/entities/versioning-config.entity.js";
+import type { ChangelogConfig } from "../../domain/entities/changelog-config.entity.js";
 import type {
   GitRepository,
   PushOptions,
@@ -27,8 +33,9 @@ import type { VersionPrompter } from "../../domain/ports/version-prompter.port.j
 import { noopVersionPrompter } from "../../domain/ports/version-prompter.port.js";
 import { omitUndefined } from "../../utils.js";
 import { join } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import yaml from "js-yaml";
+
 
 export interface FinishBranchInput {
   readonly branch: string;
@@ -113,6 +120,7 @@ export class FinishBranchUseCase {
   private readonly versions = new VersionCalculatorService();
   private readonly branchVersionResolver = new BranchVersionResolverService();
   private readonly versionTargets = new VersionTargetsService();
+  private readonly changelogGenerator = new ChangelogGeneratorService();
 
   constructor(
     private readonly workflow: WorkflowService,
@@ -187,10 +195,7 @@ export class FinishBranchUseCase {
             tagPrefix,
           );
           if (resolution) {
-            return {
-              version: resolution.version,
-              final: branchVersionCfg.overrideBumpRules === true,
-            };
+            return { version: resolution.version, final: branchVersionCfg.overrideBumpRules === true };
           }
           break;
         }
@@ -233,7 +238,7 @@ export class FinishBranchUseCase {
     const versionFilePath = join(this.git.cwd, versioning.config ?? ".gitwe/version.yaml");
     let raw: string;
     try {
-      raw = await this.git.raw(["cat-file", "--textconv", versionFilePath]);
+      raw = await readFile(versionFilePath, "utf8");
     } catch {
       return undefined; // file doesn't exist (yet) — not an error, just nothing to read
     }
@@ -294,8 +299,7 @@ export class FinishBranchUseCase {
     let currentVersion = input.currentVersion;
     let branchVersionFinal: string | undefined;
     const versioningCfg = this.workflow.config.versioning;
-    const willTag =
-      tagOverride ?? this.workflow.shouldTagForFinish(resolved.type, resolved.type.target);
+    const willTag = tagOverride ?? this.workflow.shouldTagForFinish(resolved.type, resolved.type.target);
 
     if (versioningCfg?.enabled && willTag && !input.currentVersion) {
       const resolution = await this.resolveCurrentVersion(resolved.branch, versioningCfg);
@@ -456,6 +460,9 @@ export class FinishBranchUseCase {
       // updates. Left undefined when a custom --tagname or the timestamp
       // fallback is used, since neither is a real semantic version.
       let bareVersion: string | undefined;
+      // The tag we bumped FROM, if any — used to scope changelog commit
+      // gathering to "since the last release" instead of full history.
+      let previousTagName: string | undefined;
 
       if (state.tagname) {
         tagName = state.tagname;
@@ -476,6 +483,13 @@ export class FinishBranchUseCase {
             const next = this.versions.bump(baseVersion, bump);
             bareVersion = this.versions.format(next);
             tagName = this.versions.format(next, tagPrefix);
+            const candidatePreviousTag = this.versions.format(
+              this.versions.parse(baseVersion),
+              tagPrefix,
+            );
+            if (await this.git.tagExists(candidatePreviousTag)) {
+              previousTagName = candidatePreviousTag;
+            }
           } else if (bump !== "none") {
             // No --current-version, and no existing "${tagPrefix}X.Y.Z" tag at
             // all — this is the very first release, so start from the
@@ -511,9 +525,14 @@ export class FinishBranchUseCase {
       (state as { tag?: string }).tag = tagName;
       done.add("tag");
 
-      // ---- Update .gitwe/version.yaml + versioning.targetVersion, then commit ---
+      // ---- Update .gitwe/version.yaml + versioning.targetVersion (+ changelog), then commit ---
       if (versioningCfg?.autoCommit && bareVersion && !done.has("version-files")) {
-        await this.applyVersionToFiles(versioningCfg, bareVersion);
+        await this.applyVersionToFiles(
+          versioningCfg,
+          this.workflow.config.changelog,
+          bareVersion,
+          previousTagName,
+        );
         done.add("version-files");
       }
     }
@@ -640,16 +659,24 @@ export class FinishBranchUseCase {
 
   /**
    * Updates `.gitwe/version.yaml`'s (or `versioning.config`'s) `currentVersion`
-   * field and every configured `versioning.targetVersion` file to `newVersion`
-   * (a bare semver, no tagPrefix), then commits the changes. Called right
-   * after a release tag is created, when `versioning.autoCommit` is enabled.
+   * field, every configured `versioning.targetVersion` file, and (when
+   * `changelog.enabled`) the changelog file, to `newVersion` (a bare semver,
+   * no tagPrefix) — then commits everything staged. Called right after a
+   * release tag is created, when `versioning.autoCommit` is enabled.
    */
   private async applyVersionToFiles(
     versioning: VersioningConfig,
+    changelog: ChangelogConfig | undefined,
     newVersion: string,
+    previousTagName: string | undefined,
   ): Promise<void> {
     const versionFilePath = join(this.git.cwd, versioning.config ?? ".gitwe/version.yaml");
-    const raw = await this.git.raw(["cat-file", "--textconv", versionFilePath]);
+    let raw = "";
+    try {
+      raw = await readFile(versionFilePath, "utf8");
+    } catch {
+      // first release / file not created yet — start from an empty document
+    }
     const currentContent = (yaml.load(raw) as Record<string, unknown>) ?? {};
     currentContent.currentVersion = newVersion;
     const updatedYaml = yaml.dump(currentContent, { lineWidth: 100 });
@@ -659,15 +686,104 @@ export class FinishBranchUseCase {
 
     for (const target of versioning.targetVersion ?? []) {
       const targetPath = join(this.git.cwd, target.file);
-      const rawTarget = await this.git.raw(["cat-file", "--textconv", targetPath]);
+      let rawTarget: string;
+      try {
+        rawTarget = await readFile(targetPath, "utf8");
+      } catch (error) {
+        throw new ValidationError(
+          `could not read versioning target "${target.file}": ${(error as Error).message}`,
+        );
+      }
       const updatedTarget = this.versionTargets.apply(target, rawTarget, newVersion);
       await writeFile(targetPath, updatedTarget, "utf8");
       await this.git.raw(["add", targetPath]);
+    }
+
+    if (changelog?.enabled) {
+      await this.updateChangelog(changelog, newVersion, previousTagName);
     }
 
     const message =
       versioning.commitMessage?.replace(/{{version}}/g, newVersion) ??
       `chore: bump version to ${newVersion}`;
     await this.git.raw(["commit", "-m", message]);
+  }
+
+  /**
+   * Generates the changelog section for this release from commits since
+   * `previousTagName` (or full history, if this is the first release) and
+   * prepends it to `changelog.file`. Stages the file for the commit
+   * `applyVersionToFiles` is about to make, unless `changelog.autoCommit`
+   * is explicitly `false` — in which case the file is still written, just
+   * left unstaged for the user to review.
+   */
+  private async updateChangelog(
+    changelog: ChangelogConfig,
+    newVersion: string,
+    previousTagName: string | undefined,
+  ): Promise<void> {
+    const range = previousTagName ? `${previousTagName}..HEAD` : "HEAD";
+    const commits = await this.gatherChangelogCommits(range);
+    const lineTemplate = await this.readChangelogTemplate(changelog);
+    const date = new Date().toISOString().slice(0, 10);
+    const section = this.changelogGenerator.buildSection(
+      newVersion,
+      date,
+      commits,
+      changelog,
+      lineTemplate,
+    );
+
+    const outputPath = join(this.git.cwd, changelog.file ?? "CHANGELOG.md");
+    let existing = "";
+    try {
+      existing = await readFile(outputPath, "utf8");
+    } catch {
+      // no changelog yet — start fresh
+    }
+    const updated = this.changelogGenerator.prepend(existing, section);
+    await writeFile(outputPath, updated, "utf8");
+
+    if (changelog.autoCommit ?? true) {
+      await this.git.raw(["add", outputPath]);
+    }
+  }
+
+  /** Reads commits in `range` via `git log`, using ASCII separators to survive arbitrary commit messages. */
+  private async gatherChangelogCommits(range: string): Promise<ChangelogCommit[]> {
+    const UNIT_SEP = "\x1f";
+    const RECORD_SEP = "\x1e";
+    let raw: string;
+    try {
+      raw = await this.git.raw(["log", range, `--pretty=format:%H${UNIT_SEP}%an${UNIT_SEP}%B${RECORD_SEP}`]);
+    } catch {
+      return []; // e.g. no commits at all yet
+    }
+    return raw
+      .split(RECORD_SEP)
+      .map((record) => record.trim())
+      .filter(Boolean)
+      .map((record) => {
+        const [hash = "", author = "", ...rest] = record.split(UNIT_SEP);
+        return { hash, author, message: rest.join(UNIT_SEP) };
+      })
+      .filter((commit) => commit.hash);
+  }
+
+  /** Reads the first non-comment, non-blank line of `changelog.template.path` as the entry line template. */
+  private async readChangelogTemplate(changelog: ChangelogConfig): Promise<string> {
+    const templatePath = changelog.template?.path;
+    if (!templatePath) return DEFAULT_CHANGELOG_LINE_TEMPLATE;
+
+    try {
+      const raw = await readFile(join(this.git.cwd, templatePath), "utf8");
+      const line = raw
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 0 && !l.startsWith("#"));
+      return line ?? DEFAULT_CHANGELOG_LINE_TEMPLATE;
+    } catch {
+      return DEFAULT_CHANGELOG_LINE_TEMPLATE; // template file missing — fall back quietly
+    }
   }
 }

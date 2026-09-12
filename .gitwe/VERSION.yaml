@@ -1,21 +1,16 @@
 # .gitwe/version.yaml
 version: 1
 
-currentVersion: "0.1.0"
+currentVersion: "1.0.0"
 
-tagSource:
-  - branch
-  - config
-  - tag
-  - manual
-  - error
+# Ordered list of strategies gitwe tries to determine the "current version"
+# baseline for a release; the first one that resolves a value wins.
+# Defaults to [branch, tag]. Ignored when --current-version is passed on
+# the CLI.
+# tagSource: [branch, config, tag, manual, error]
 
-tagTypes:
-  - release
-  - hotfix
-
-tagTargets:
-  - root # root = no base on baseBranches
+tagTypes: [release, hotfix]
+tagTargets: [root] # root = no base on baseBranches
 
 tagPrefix: v
 format: "{{tagPrefix}}{{major}}.{{minor}}.{{patch}}" # {{#if prerelease}}-{{prerelease}}{{/if}}"
@@ -24,37 +19,34 @@ annotated: true
 autoCommit: true
 commitMessage: "chore: bump version to {{version}}"
 
-sign: true
-pushTags: true
+sign: false
+pushTags: false
 
 bumpRules:
   major: []
-  minor:
-    - release
-  patch:
-    - hotfix
+  minor: ["release"]
+  patch: ["hotfix"]
   prerelease:
     enabled: false
-    branchType: []
+    branchType: [] # branch type names that trigger a prerelease bump
     format: "{{type}}.{{number}}"
-    types:
-      - alpha
-      - beta
-      - rc
+    types: ["alpha", "beta", "rc"]
 
-targetVersion:
-  - file: package.json
-    path: version
-  - file: src/version.ts
-    pattern: "export const version = '{{version}}';"
+# Files to update (in addition to the git tag) whenever the version bumps.
+# targetVersion:
+#   - file: package.json
+#     path: version # dot-notation JSON key path
+#   - file: src/version.ts
+#     pattern: "export const version = '{{version}}';"
 
-branchVersion:
-  patterns:
-    - "release/v{{version}}" # release/v0.35.2
-    - "release/{{version}}" # release/0.35.2
-    - "hotfix/v{{version}}" # hotfix/v0.35.3
-    - "hotfix/{{version}}" # hotfix/0.35.3
-    # - "v{{version}}" # v0.35.2
-    # - "{{version}}" # 0.35.2
-  stripPrefix: true
-  overrideBumpRules: true
+# Only consulted when "branch" appears in `tagSource` above.
+# branchVersion:
+#   patterns:
+#     - "release/v{{version}}" # release/v0.35.2
+#     - "release/{{version}}" # release/0.35.2
+#     - "hotfix/v{{version}}" # hotfix/v0.35.3
+#     - "hotfix/{{version}}" # hotfix/0.35.3
+#     - "v{{version}}" # v0.35.2
+#     - "{{version}}" # 0.35.2
+#   stripPrefix: true
+#   overrideBumpRules: true

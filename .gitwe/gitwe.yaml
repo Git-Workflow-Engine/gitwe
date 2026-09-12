@@ -43,9 +43,13 @@ branchTypes:
 
 merge:
   strategy: merge
-  deleteOnFinish: [feature, release, hotfix]
+  deleteOnFinish:
+    - bugfix
+    - hotfix
+    - feature
+    - release
   squash:
-    enabled: true
+    enabled: false
     default: false
     branchTypes: [feature]
 

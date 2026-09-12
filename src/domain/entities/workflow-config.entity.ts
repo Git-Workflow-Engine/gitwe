@@ -3,6 +3,7 @@ import type { BranchType } from "./branch-type.entity.js";
 import { HookConfig } from "./hook-config.entity.js";
 import { RemoteConfig } from "./remote-config.entity.js";
 import { VersioningConfig } from "./versioning-config.entity.js";
+import type { ChangelogConfig } from "./changelog-config.entity.js";
 
 export type MergeStrategy = "merge" | "squash" | "rebase";
 
@@ -26,10 +27,7 @@ export interface MergeConfig {
   readonly squash?: SquashConfig;
 }
 
-export interface ChangelogConfig {
-  readonly enabled: boolean;
-  readonly config?: string;
-}
+export type { ChangelogConfig } from "./changelog-config.entity.js";
 
 export interface WorkflowConfig {
   readonly version: 1;

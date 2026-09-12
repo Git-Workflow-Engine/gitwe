@@ -5,7 +5,7 @@ import { FileOperationStateStore } from "../infrastructure/state/file-operation-
 import { ConsoleLogger } from "../infrastructure/logger/console-logger.adapter.js";
 import type { EngineDeps } from "../application/engine.js";
 import { HookConfig } from "../domain/entities/hook-config.entity.js";
-import { readlineVersionPrompter } from "../cli/version-prompter.adapter.js";
+import { readlineVersionPrompter } from "./version-prompter.adapter.js";
 
 export interface GlobalOptions {
   readonly cwd: string;

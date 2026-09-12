@@ -384,10 +384,6 @@ describe("FinishBranchUseCase", () => {
         const git = fakeGit({
           cwd: dir,
           branchExists: async (b) => new Set(["main", "develop", "release/x"]).has(b),
-          raw: async (args: string[]) => {
-            if (args[0] === "cat-file") return readFile(args[2] as string, "utf8");
-            return "";
-          },
         });
         let createdTag: string | undefined;
         const gitWithTagCapture = {
@@ -490,13 +486,6 @@ describe("FinishBranchUseCase", () => {
         cwd: dir,
         branchExists: async (b) => new Set(["main", "develop", "release/2.0"]).has(b),
         listTags: async () => ["v0.34.0"],
-        raw: async (args: string[]) => {
-          if (args[0] === "cat-file") {
-            const path = args[2] as string;
-            return readFile(path, "utf8");
-          }
-          return "";
-        },
       });
 
       const useCase = new FinishBranchUseCase(
@@ -522,6 +511,180 @@ describe("FinishBranchUseCase", () => {
         await readFile(join(dir, ".gitwe/version.yaml"), "utf8"),
       ) as Record<string, unknown>;
       expect(versionYaml.currentVersion).toBe("0.35.0");
+    });
+  });
+
+  // ---- changelog ----------------------------------------------------------
+
+  describe("changelog", () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), "gitwe-changelog-"));
+      await mkdir(join(dir, ".gitwe"), { recursive: true });
+      await writeFile(join(dir, ".gitwe/version.yaml"), "currentVersion: 1.0.0\n", "utf8");
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    const UNIT_SEP = "\x1f";
+    const RECORD_SEP = "\x1e";
+
+    /** Encodes commits the same way `git log --pretty=format:%H<US>%an<US>%B<RS>` would. */
+    function encodeCommits(commits: { hash: string; author: string; message: string }[]): string {
+      return commits
+        .map((c) => `${c.hash}${UNIT_SEP}${c.author}${UNIT_SEP}${c.message}${RECORD_SEP}`)
+        .join("");
+    }
+
+    it("generates CHANGELOG.md from conventional commits and bundles it into the release commit", async () => {
+      const changelogWorkflow = new WorkflowService({
+        ...classicPreset(),
+        versioning: { ...classicPreset().versioning, enabled: true, autoCommit: true },
+        changelog: {
+          enabled: true,
+          file: "CHANGELOG.md",
+          commitTypes: { feat: "Added", fix: "Fixed" },
+          breakingChangeHeading: "Breaking Changes",
+        },
+      });
+
+      const addedPaths: string[] = [];
+      const git = fakeGit({
+        cwd: dir,
+        branchExists: async (b) => new Set(["main", "develop", "release/2.0"]).has(b),
+        listTags: async () => ["v1.0.0"],
+        tagExists: async (name) => name === "v1.0.0",
+        raw: async (args: string[]) => {
+          if (args[0] === "log") {
+            return encodeCommits([
+              { hash: "1111111aaaa", author: "Ada", message: "feat: add dark mode" },
+              {
+                hash: "2222222bbbb",
+                author: "Ada",
+                message: "fix(auth): handle expired tokens",
+              },
+              { hash: "3333333cccc", author: "Ada", message: "chore: bump deps" },
+            ]);
+          }
+          if (args[0] === "add") addedPaths.push(args[1] as string);
+          return "";
+        },
+      });
+
+      const useCase = new FinishBranchUseCase(
+        changelogWorkflow,
+        git,
+        noopHooks,
+        silentLogger,
+        memoryStateStore(),
+      );
+
+      // "release" bumps minor per classicPreset -> v1.1.0
+      const result = await useCase.execute({ kind: "start", branch: "release/2.0" });
+      expect(result.tag).toBe("v1.1.0");
+
+      const changelog = await readFile(join(dir, "CHANGELOG.md"), "utf8");
+      expect(changelog).toContain("# Changelog");
+      expect(changelog).toContain("## [1.1.0] -");
+      expect(changelog).toContain("### Added");
+      expect(changelog).toContain("- add dark mode (1111111)");
+      expect(changelog).toContain("### Fixed");
+      expect(changelog).toContain("- **auth:** handle expired tokens (2222222)");
+      expect(changelog).not.toContain("bump deps");
+
+      expect(addedPaths).toContain(join(dir, "CHANGELOG.md"));
+    });
+
+    it("writes but doesn't stage the changelog when changelog.autoCommit is false", async () => {
+      const changelogWorkflow = new WorkflowService({
+        ...classicPreset(),
+        versioning: { ...classicPreset().versioning, enabled: true, autoCommit: true },
+        changelog: {
+          enabled: true,
+          autoCommit: false,
+          commitTypes: { feat: "Added" },
+        },
+      });
+
+      const addedPaths: string[] = [];
+      const git = fakeGit({
+        cwd: dir,
+        branchExists: async (b) => new Set(["main", "develop", "release/2.0"]).has(b),
+        listTags: async () => ["v1.0.0"],
+        tagExists: async (name) => name === "v1.0.0",
+        raw: async (args: string[]) => {
+          if (args[0] === "log") {
+            return encodeCommits([
+              { hash: "abcdefabcdef", author: "Ada", message: "feat: add dark mode" },
+            ]);
+          }
+          if (args[0] === "add") addedPaths.push(args[1] as string);
+          return "";
+        },
+      });
+
+      const useCase = new FinishBranchUseCase(
+        changelogWorkflow,
+        git,
+        noopHooks,
+        silentLogger,
+        memoryStateStore(),
+      );
+
+      await useCase.execute({ kind: "start", branch: "release/2.0" });
+
+      const changelog = await readFile(join(dir, "CHANGELOG.md"), "utf8");
+      expect(changelog).toContain("- add dark mode (abcdefa)");
+      expect(addedPaths).not.toContain(join(dir, "CHANGELOG.md"));
+    });
+
+    it("uses a custom template line when changelog.template.path is set", async () => {
+      await writeFile(
+        join(dir, ".gitwe/changelog.template"),
+        "# custom template\n- {{subject}} by {{author}}\n",
+        "utf8",
+      );
+
+      const changelogWorkflow = new WorkflowService({
+        ...classicPreset(),
+        versioning: { ...classicPreset().versioning, enabled: true, autoCommit: true },
+        changelog: {
+          enabled: true,
+          commitTypes: { feat: "Added" },
+          template: { path: ".gitwe/changelog.template" },
+        },
+      });
+
+      const git = fakeGit({
+        cwd: dir,
+        branchExists: async (b) => new Set(["main", "develop", "release/2.0"]).has(b),
+        listTags: async () => ["v1.0.0"],
+        tagExists: async (name) => name === "v1.0.0",
+        raw: async (args: string[]) => {
+          if (args[0] === "log") {
+            return encodeCommits([
+              { hash: "abcdefabcdef", author: "Ada", message: "feat: add dark mode" },
+            ]);
+          }
+          return "";
+        },
+      });
+
+      const useCase = new FinishBranchUseCase(
+        changelogWorkflow,
+        git,
+        noopHooks,
+        silentLogger,
+        memoryStateStore(),
+      );
+
+      await useCase.execute({ kind: "start", branch: "release/2.0" });
+
+      const changelog = await readFile(join(dir, "CHANGELOG.md"), "utf8");
+      expect(changelog).toContain("- add dark mode by Ada");
     });
   });
 });

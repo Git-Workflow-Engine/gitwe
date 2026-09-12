@@ -2,23 +2,19 @@
 version: 1
 
 enabled: false
-file: CHANGELOG.md
-template:
-  path: ".gitwe/changelog.template"
+file: CHANGELOG.md   # output file, relative to the repository root
+autoCommit: true     # bundle into the same commit as versioning.targetVersion
 
-autoCommit: true
-
+# Conventional-commit type -> "Keep a Changelog" section heading.
+# Types not listed here (chore, test, ci, build, style, ...) are skipped.
 commitTypes:
   feat: Added
   fix: Fixed
   perf: Performance
   revert: Reverted
   docs: Documentation
-  # chore:
 
-breakingChangeHeading: "Breaking Changes"
+breakingChangeHeading: "Breaking Changes"   # commits with "!" or a BREAKING CHANGE: footer
 
 template:
   path: ".gitwe/changelog.template"
-  # پیش‌فرض داخلی اگه فایل نبود: "- {{subject}} ({{shortHash}})"
-  # پلیس‌هولدرهای در دسترس: {{subject}} {{scope}} {{shortHash}} {{hash}} {{author}}
