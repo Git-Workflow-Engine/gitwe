@@ -9,7 +9,7 @@ function escapeRegExp(value: string): string {
 
 /**
  * Pure, unit-testable service that computes the new contents of a
- * `versioning.targets` file given its current contents and the new version
+ * `versioning.targetVersion` file given its current contents and the new version
  * string. No I/O — callers are responsible for reading/writing the file.
  */
 export class VersionTargetsService {

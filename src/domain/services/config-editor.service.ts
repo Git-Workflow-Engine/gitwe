@@ -264,7 +264,12 @@ export class ConfigEditorService {
           ...(bumpRules.minor ? { minor: bumpRules.minor.map((x) => (x === from ? to : x)) } : {}),
           ...(bumpRules.patch ? { patch: bumpRules.patch.map((x) => (x === from ? to : x)) } : {}),
           ...(bumpRules.prerelease
-            ? { prerelease: bumpRules.prerelease.map((x) => (x === from ? to : x)) }
+            ? {
+                prerelease: {
+                  ...bumpRules.prerelease,
+                  branchType: bumpRules.prerelease.branchType.map((x) => (x === from ? to : x)),
+                },
+              }
             : {}),
         };
         newVersioning = { ...versioning, bumpRules: newRules };
@@ -350,9 +355,16 @@ export class ConfigEditorService {
     const versioning = config.versioning;
     let newVersioning = versioning;
     if (versioning?.bumpRules) {
-      const bumpRules = { ...versioning.bumpRules };
-      for (const [bump, types] of Object.entries(bumpRules)) {
-        bumpRules[bump as keyof typeof bumpRules] = types.filter((x) => x !== name);
+      const { prerelease, ...rest } = versioning.bumpRules;
+      const bumpRules: typeof versioning.bumpRules = { ...rest };
+      for (const [bump, types] of Object.entries(rest)) {
+        bumpRules[bump as keyof typeof rest] = types?.filter((x) => x !== name);
+      }
+      if (prerelease) {
+        bumpRules.prerelease = {
+          ...prerelease,
+          branchType: prerelease.branchType.filter((x) => x !== name),
+        };
       }
       newVersioning = { ...versioning, bumpRules };
     }

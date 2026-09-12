@@ -33,4 +33,31 @@ describe("WorkflowService", () => {
     expect(workflow.allowsSquash(workflow.requireBranchType("feature"))).toBe(true);
     expect(workflow.allowsSquash(workflow.requireBranchType("hotfix"))).toBe(false);
   });
+
+  it("derives a prerelease bump from bumpRules.prerelease.branchType", () => {
+    const customWorkflow = new WorkflowService({
+      ...classicPreset(),
+      versioning: {
+        ...classicPreset().versioning,
+        enabled: true,
+        bumpRules: {
+          ...classicPreset().versioning?.bumpRules,
+          prerelease: {
+            enabled: true,
+            branchType: ["support"],
+            format: "{{type}}.{{number}}",
+            types: ["alpha", "beta", "rc"],
+          },
+        },
+      },
+    });
+
+    expect(customWorkflow.versionBumpFor(customWorkflow.requireBranchType("support"))).toBe(
+      "prerelease",
+    );
+    // untouched branch types still resolve to their own rule
+    expect(customWorkflow.versionBumpFor(customWorkflow.requireBranchType("release"))).toBe(
+      "minor",
+    );
+  });
 });

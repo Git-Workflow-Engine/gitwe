@@ -36,11 +36,6 @@ export class VersionConfigLoader {
         pushTags: false,
         autoCommit: false,
         commitMessage: "chore: bump version to {{version}}",
-        prerelease: {
-          enabled: false,
-          format: "{{type}}.{{number}}",
-          types: ["alpha", "beta", "rc"],
-        },
       },
       fileConfig,
       mainVersioning,
@@ -48,14 +43,26 @@ export class VersionConfigLoader {
 
     merged.tagTypes = merged.tagTypes ?? [];
     merged.tagTargets = merged.tagTargets ?? [];
-    merged.targets = merged.targets ?? [];
+    merged.targetVersion = merged.targetVersion ?? [];
+    merged.tagSource = merged.tagSource ?? ["branch", "tag"];
     merged.branchVersion = {
-      enabled: false,
       patterns: [],
-      fallback: "bumpRules",
       stripPrefix: true,
       overrideBumpRules: false,
       ...merged.branchVersion,
+    };
+    merged.bumpRules = {
+      major: [],
+      minor: [],
+      patch: [],
+      ...merged.bumpRules,
+      prerelease: {
+        enabled: false,
+        branchType: [],
+        format: "{{type}}.{{number}}",
+        types: ["alpha", "beta", "rc"],
+        ...merged.bumpRules?.prerelease,
+      },
     };
 
     return merged;

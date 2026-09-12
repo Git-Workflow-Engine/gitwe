@@ -7,6 +7,8 @@ import type { HookContext, HookRunner } from "../domain/ports/hook-runner.port.j
 import type { Logger } from "../domain/ports/logger.port.js";
 import { silentLogger } from "../domain/ports/logger.port.js";
 import type { OperationStateStore } from "../domain/ports/operation-state-store.port.js";
+import type { VersionPrompter } from "../domain/ports/version-prompter.port.js";
+import { noopVersionPrompter } from "../domain/ports/version-prompter.port.js";
 
 import { InitWorkflowUseCase } from "./use-cases/init-workflow.use-case.js";
 import { StartBranchUseCase } from "./use-cases/start-branch.use-case.js";
@@ -37,6 +39,7 @@ export interface EngineDeps {
   readonly hooks: HookRunner;
   readonly stateStore: OperationStateStore;
   readonly logger?: Logger;
+  readonly prompter?: VersionPrompter;
 }
 
 export interface InitEngineOptions {
@@ -87,7 +90,12 @@ export class Engine {
     );
 
     const workflow = new WorkflowService({ ...config, versioning, remote, hooks: hookConfig });
-    return new Engine(workflow, { logger: silentLogger, ...deps, hooks });
+    return new Engine(workflow, {
+      logger: silentLogger,
+      prompter: noopVersionPrompter,
+      ...deps,
+      hooks,
+    });
   }
 
   static async init(deps: EngineDeps, options: InitEngineOptions): Promise<Engine> {
@@ -98,7 +106,11 @@ export class Engine {
       force: options.force,
       createBranches: options.createBranches,
     });
-    return new Engine(new WorkflowService(config), { logger: silentLogger, ...deps });
+    return new Engine(new WorkflowService(config), {
+      logger: silentLogger,
+      prompter: noopVersionPrompter,
+      ...deps,
+    });
   }
   /** Optional helper for older call sites that only pass a preset name. */
   static async initFromPreset(
@@ -431,6 +443,7 @@ export class Engine {
       this.deps.hooks,
       this.deps.logger,
       this.deps.stateStore,
+      this.deps.prompter,
     ).execute({ kind: "start", branch, ...options });
   }
 

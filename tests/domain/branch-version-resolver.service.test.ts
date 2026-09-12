@@ -6,7 +6,6 @@ describe("BranchVersionResolverService", () => {
   const resolver = new BranchVersionResolverService();
 
   const baseConfig: BranchVersionConfig = {
-    enabled: true,
     patterns: [
       "release/v{{version}}",
       "release/{{version}}",
@@ -38,14 +37,13 @@ describe("BranchVersionResolverService", () => {
   });
 
   it("strips the tag prefix by default so a bare pattern also matches v-prefixed names", () => {
-    const config: BranchVersionConfig = { enabled: true, patterns: ["{{version}}"] };
+    const config: BranchVersionConfig = { patterns: ["{{version}}"] };
     const result = resolver.resolve("v0.35.2", config, "v");
     expect(result).toEqual({ version: "0.35.2", pattern: "{{version}}" });
   });
 
   it("does not strip the tag prefix when stripPrefix is false", () => {
     const config: BranchVersionConfig = {
-      enabled: true,
       patterns: ["{{version}}"],
       stripPrefix: false,
     };
@@ -58,7 +56,6 @@ describe("BranchVersionResolverService", () => {
 
   it("skips a pattern whose captured text isn't a valid semver", () => {
     const config: BranchVersionConfig = {
-      enabled: true,
       patterns: ["release/{{version}}", "{{version}}"],
     };
     // "not-semver" doesn't parse, so it falls through to the bare pattern —

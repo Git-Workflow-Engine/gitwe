@@ -151,7 +151,7 @@ export class WorkflowService {
     if (rules.major?.includes(type.name)) return "major";
     if (rules.minor?.includes(type.name)) return "minor";
     if (rules.patch?.includes(type.name)) return "patch";
-    if (rules.prerelease?.includes(type.name)) return "prerelease";
+    if (rules.prerelease?.branchType?.includes(type.name)) return "prerelease";
     return "none";
   }
 

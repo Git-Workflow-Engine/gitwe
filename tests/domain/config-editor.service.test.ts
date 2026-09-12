@@ -57,4 +57,52 @@ describe("ConfigEditorService", () => {
     // و در squash.branchTypes
     expect(updated.merge?.squash?.branchTypes).not.toContain("feature");
   });
+
+  it("keeps bumpRules.prerelease.branchType in sync when renaming a branch type", () => {
+    const config = {
+      ...classicPreset(),
+      versioning: {
+        ...classicPreset().versioning!,
+        bumpRules: {
+          minor: ["release"],
+          patch: ["hotfix"],
+          prerelease: {
+            enabled: true,
+            branchType: ["feature"],
+            format: "{{type}}.{{number}}",
+            types: ["alpha", "beta", "rc"],
+          },
+        },
+      },
+    };
+
+    const updated = editor.renameBranchType(config, "feature", "feat2");
+    expect(updated.versioning?.bumpRules?.prerelease?.branchType).toEqual(["feat2"]);
+    // the rest of bumpRules.prerelease is left untouched
+    expect(updated.versioning?.bumpRules?.prerelease?.enabled).toBe(true);
+    expect(updated.versioning?.bumpRules?.prerelease?.types).toEqual(["alpha", "beta", "rc"]);
+  });
+
+  it("keeps bumpRules.prerelease.branchType in sync when deleting a branch type", () => {
+    const config = {
+      ...classicPreset(),
+      versioning: {
+        ...classicPreset().versioning!,
+        bumpRules: {
+          minor: ["release"],
+          patch: ["hotfix"],
+          prerelease: {
+            enabled: true,
+            branchType: ["feature", "release"],
+            format: "{{type}}.{{number}}",
+            types: ["alpha", "beta", "rc"],
+          },
+        },
+      },
+    };
+
+    const updated = editor.deleteBranchType(config, "feature");
+    expect(updated.versioning?.bumpRules?.prerelease?.branchType).toEqual(["release"]);
+    expect(updated.versioning?.bumpRules?.minor).toEqual(["release"]);
+  });
 });

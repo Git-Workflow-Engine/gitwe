@@ -5,6 +5,7 @@ import { FileOperationStateStore } from "../infrastructure/state/file-operation-
 import { ConsoleLogger } from "../infrastructure/logger/console-logger.adapter.js";
 import type { EngineDeps } from "../application/engine.js";
 import { HookConfig } from "../domain/entities/hook-config.entity.js";
+import { readlineVersionPrompter } from "../cli/version-prompter.adapter.js";
 
 export interface GlobalOptions {
   readonly cwd: string;
@@ -32,5 +33,5 @@ export function buildEngineDeps(options: GlobalOptions): EngineDeps {
   };
   const hooks = new FileHookRunner(root, defaultHookConfig, true);
 
-  return { configRepo, git, hooks, stateStore, logger };
+  return { configRepo, git, hooks, stateStore, logger, prompter: readlineVersionPrompter };
 }

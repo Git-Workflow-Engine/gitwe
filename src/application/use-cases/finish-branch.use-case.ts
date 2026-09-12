@@ -23,6 +23,8 @@ import type {
   OperationState,
   OperationStateStore,
 } from "../../domain/ports/operation-state-store.port.js";
+import type { VersionPrompter } from "../../domain/ports/version-prompter.port.js";
+import { noopVersionPrompter } from "../../domain/ports/version-prompter.port.js";
 import { omitUndefined } from "../../utils.js";
 import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
@@ -118,6 +120,7 @@ export class FinishBranchUseCase {
     private readonly hooks: HookRunner,
     private readonly logger: Logger,
     private readonly stateStore: OperationStateStore,
+    private readonly prompter: VersionPrompter = noopVersionPrompter,
   ) {}
 
   /**
@@ -160,6 +163,93 @@ export class FinishBranchUseCase {
     return bestRaw;
   }
 
+  /**
+   * Walks `versioning.tagSource` (default `["branch", "tag"]`) in order and
+   * returns the first strategy that resolves a version, or `undefined` if
+   * none do (the caller then falls back to `versioning.currentVersion` /
+   * a timestamp, same as before this existed).
+   */
+  private async resolveCurrentVersion(
+    branchName: string,
+    versioning: VersioningConfig,
+  ): Promise<{ version: string; final: boolean } | undefined> {
+    const sources = versioning.tagSource ?? ["branch", "tag"];
+    const tagPrefix = versioning.tagPrefix ?? "v";
+
+    for (const source of sources) {
+      switch (source) {
+        case "branch": {
+          const branchVersionCfg = versioning.branchVersion;
+          if (!branchVersionCfg?.patterns?.length) break;
+          const resolution = this.branchVersionResolver.resolve(
+            branchName,
+            branchVersionCfg,
+            tagPrefix,
+          );
+          if (resolution) {
+            return {
+              version: resolution.version,
+              final: branchVersionCfg.overrideBumpRules === true,
+            };
+          }
+          break;
+        }
+        case "config": {
+          const version = await this.readVersionFromFile(versioning);
+          if (version) return { version, final: false };
+          break;
+        }
+        case "tag": {
+          const version = await this.discoverCurrentVersion(tagPrefix);
+          if (version) return { version, final: false };
+          break;
+        }
+        case "manual": {
+          if (!this.prompter.isAvailable()) break;
+          const answer = await this.prompter.promptVersion(
+            "Enter the current version to bump from",
+            versioning.currentVersion,
+          );
+          if (!answer) break;
+          try {
+            this.versions.parse(answer);
+          } catch {
+            throw new ValidationError(`"${answer}" is not a valid semantic version`);
+          }
+          return { version: answer, final: false };
+        }
+        case "error":
+          throw new ValidationError(
+            `could not determine the current version from any configured "versioning.tagSource" (${sources.join(", ")})`,
+            `pass --current-version explicitly, or add "manual"/adjust versioning.tagSource in your config`,
+          );
+      }
+    }
+    return undefined;
+  }
+
+  /** Reads `currentVersion` out of `.gitwe/version.yaml` (or `versioning.config`), if present and valid. */
+  private async readVersionFromFile(versioning: VersioningConfig): Promise<string | undefined> {
+    const versionFilePath = join(this.git.cwd, versioning.config ?? ".gitwe/version.yaml");
+    let raw: string;
+    try {
+      raw = await this.git.raw(["cat-file", "--textconv", versionFilePath]);
+    } catch {
+      return undefined; // file doesn't exist (yet) — not an error, just nothing to read
+    }
+
+    const parsed = yaml.load(raw) as Record<string, unknown> | undefined;
+    const value = parsed?.["currentVersion"];
+    if (typeof value !== "string") return undefined;
+
+    try {
+      this.versions.parse(value);
+    } catch {
+      return undefined; // not a valid semver — treat as "nothing found", try the next source
+    }
+    return value;
+  }
+
   async execute(action: FinishAction): Promise<FinishResult> {
     if (action.kind === "abort") return this.abort();
     if (action.kind === "continue") return this.resume();
@@ -200,38 +290,20 @@ export class FinishBranchUseCase {
     const fetch = input.fetch ?? true; // default: fetch
     const bump = input.bump;
 
-    // ---- branchVersion: extract the release version from the branch name --
+    // ---- Determine the "current version" baseline (or final override) ----
     let currentVersion = input.currentVersion;
     let branchVersionFinal: string | undefined;
     const versioningCfg = this.workflow.config.versioning;
-    const branchVersionCfg = versioningCfg?.branchVersion;
+    const willTag =
+      tagOverride ?? this.workflow.shouldTagForFinish(resolved.type, resolved.type.target);
 
-    if (versioningCfg?.enabled && branchVersionCfg?.enabled && !input.currentVersion) {
-      const resolution = this.branchVersionResolver.resolve(
-        resolved.branch,
-        branchVersionCfg,
-        versioningCfg.tagPrefix ?? "v",
-      );
-
+    if (versioningCfg?.enabled && willTag && !input.currentVersion) {
+      const resolution = await this.resolveCurrentVersion(resolved.branch, versioningCfg);
       if (resolution) {
-        if (branchVersionCfg.overrideBumpRules) {
+        if (resolution.final) {
           branchVersionFinal = resolution.version;
         } else {
           currentVersion = resolution.version;
-        }
-      } else {
-        switch (branchVersionCfg.fallback ?? "bumpRules") {
-          case "initialVersion":
-            currentVersion = versioningCfg.initialVersion;
-            break;
-          case "error":
-            throw new ValidationError(
-              `branch "${resolved.branch}" does not match any configured "versioning.branchVersion.patterns"`,
-            );
-          case "bumpRules":
-          default:
-            // no match found — fall through to the normal tag-discovery + bumpRules flow
-            break;
         }
       }
     }
@@ -380,7 +452,7 @@ export class FinishBranchUseCase {
 
     if (shouldTag && !done.has("tag")) {
       let tagName: string;
-      // Bare version (no tagPrefix), used for versioning.targets/version.yaml
+      // Bare version (no tagPrefix), used for versioning.targetVersion/version.yaml
       // updates. Left undefined when a custom --tagname or the timestamp
       // fallback is used, since neither is a real semantic version.
       let bareVersion: string | undefined;
@@ -398,15 +470,7 @@ export class FinishBranchUseCase {
           bareVersion = this.versions.format(parsed);
           tagName = this.versions.format(parsed, tagPrefix);
         } else {
-          let baseVersion = state.currentVersion;
-          if (!baseVersion && bump !== "none") {
-            baseVersion = await this.discoverCurrentVersion(tagPrefix);
-            if (baseVersion) {
-              this.logger.info(
-                `no --current-version given; using latest existing tag ${tagPrefix}${baseVersion} as the base for this ${bump} bump`,
-              );
-            }
-          }
+          const baseVersion = state.currentVersion;
 
           if (baseVersion && bump !== "none") {
             const next = this.versions.bump(baseVersion, bump);
@@ -414,16 +478,16 @@ export class FinishBranchUseCase {
             tagName = this.versions.format(next, tagPrefix);
           } else if (bump !== "none") {
             // No --current-version, and no existing "${tagPrefix}X.Y.Z" tag at
-            // all — this is the very first release, so start from a sensible,
-            // configurable initial version instead of a meaningless timestamp.
-            const initialVersionRaw = versioningCfg?.initialVersion ?? "0.1.0";
+            // all — this is the very first release, so start from the
+            // persisted/seed currentVersion instead of a meaningless timestamp.
+            const seedVersionRaw = versioningCfg?.currentVersion ?? "0.1.0";
             this.logger.info(
               `no --current-version given and no existing "${tagPrefix}X.Y.Z" tags found; ` +
-                `treating this as the first release and starting from ${tagPrefix}${initialVersionRaw}`,
+                `treating this as the first release and starting from ${tagPrefix}${seedVersionRaw}`,
             );
-            const parsedInitial = this.versions.parse(initialVersionRaw);
-            bareVersion = this.versions.format(parsedInitial);
-            tagName = this.versions.format(parsedInitial, tagPrefix);
+            const parsedSeed = this.versions.parse(seedVersionRaw);
+            bareVersion = this.versions.format(parsedSeed);
+            tagName = this.versions.format(parsedSeed, tagPrefix);
           } else {
             this.logger.warn(
               `versioning is enabled but bump is "none" and no --tagname was given — ` +
@@ -447,7 +511,7 @@ export class FinishBranchUseCase {
       (state as { tag?: string }).tag = tagName;
       done.add("tag");
 
-      // ---- Update .gitwe/version.yaml + versioning.targets, then commit ---
+      // ---- Update .gitwe/version.yaml + versioning.targetVersion, then commit ---
       if (versioningCfg?.autoCommit && bareVersion && !done.has("version-files")) {
         await this.applyVersionToFiles(versioningCfg, bareVersion);
         done.add("version-files");
@@ -575,25 +639,25 @@ export class FinishBranchUseCase {
   }
 
   /**
-   * Updates `.gitwe/version.yaml`'s `version` field and every configured
-   * `versioning.targets` file to `newVersion` (a bare semver, no tagPrefix),
-   * then commits the changes. Called right after a release tag is created,
-   * when `versioning.autoCommit` is enabled.
+   * Updates `.gitwe/version.yaml`'s (or `versioning.config`'s) `currentVersion`
+   * field and every configured `versioning.targetVersion` file to `newVersion`
+   * (a bare semver, no tagPrefix), then commits the changes. Called right
+   * after a release tag is created, when `versioning.autoCommit` is enabled.
    */
   private async applyVersionToFiles(
     versioning: VersioningConfig,
     newVersion: string,
   ): Promise<void> {
-    const versionFilePath = join(this.git.cwd, ".gitwe/version.yaml");
+    const versionFilePath = join(this.git.cwd, versioning.config ?? ".gitwe/version.yaml");
     const raw = await this.git.raw(["cat-file", "--textconv", versionFilePath]);
     const currentContent = (yaml.load(raw) as Record<string, unknown>) ?? {};
-    currentContent.version = newVersion;
+    currentContent.currentVersion = newVersion;
     const updatedYaml = yaml.dump(currentContent, { lineWidth: 100 });
 
     await writeFile(versionFilePath, updatedYaml, "utf8");
     await this.git.raw(["add", versionFilePath]);
 
-    for (const target of versioning.targets ?? []) {
+    for (const target of versioning.targetVersion ?? []) {
       const targetPath = join(this.git.cwd, target.file);
       const rawTarget = await this.git.raw(["cat-file", "--textconv", targetPath]);
       const updatedTarget = this.versionTargets.apply(target, rawTarget, newVersion);

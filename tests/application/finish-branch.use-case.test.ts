@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import yaml from "js-yaml";
 import { FinishBranchUseCase } from "../../src/application/use-cases/finish-branch.use-case.js";
 import { WorkflowService } from "../../src/domain/services/workflow.service.js";
 import { classicPreset } from "../../src/domain/config/presets.js";
@@ -187,10 +188,10 @@ describe("FinishBranchUseCase", () => {
     expect(result.tag).toBe("v0.1.0");
   });
 
-  it("honours a custom versioning.initialVersion for the first tag", async () => {
+  it("honours a custom versioning.currentVersion seed for the first tag", async () => {
     const customWorkflow = new WorkflowService({
       ...classicPreset(),
-      versioning: { ...classicPreset().versioning, enabled: true, initialVersion: "1.0.0" },
+      versioning: { ...classicPreset().versioning, enabled: true, currentVersion: "1.0.0" },
     });
     const git = fakeGit({
       branchExists: async (b) => new Set(["main", "develop", "release/2.0"]).has(b),
@@ -248,7 +249,6 @@ describe("FinishBranchUseCase", () => {
           ...classicPreset().versioning,
           enabled: true,
           branchVersion: {
-            enabled: true,
             patterns: [
               "release/v{{version}}",
               "release/{{version}}",
@@ -270,10 +270,7 @@ describe("FinishBranchUseCase", () => {
         listTags: async () => [],
       });
       let createdTag: string | undefined;
-      const gitWithTagCapture = {
-        ...git,
-        createTag: async (name: string) => void (createdTag = name),
-      };
+      const gitWithTagCapture = { ...git, createTag: async (name: string) => void (createdTag = name) };
 
       const useCase = new FinishBranchUseCase(
         branchVersionWorkflow(),
@@ -296,10 +293,7 @@ describe("FinishBranchUseCase", () => {
         listTags: async () => [],
       });
       let createdTag: string | undefined;
-      const gitWithTagCapture = {
-        ...git,
-        createTag: async (name: string) => void (createdTag = name),
-      };
+      const gitWithTagCapture = { ...git, createTag: async (name: string) => void (createdTag = name) };
 
       const useCase = new FinishBranchUseCase(
         branchVersionWorkflow({ overrideBumpRules: true }),
@@ -315,18 +309,18 @@ describe("FinishBranchUseCase", () => {
       expect(result.tag).toBe("v0.35.2");
     });
 
-    it("falls back to initialVersion when the branch name matches no pattern", async () => {
+    it('falls through to the versioning.currentVersion seed when nothing in the chain resolves', async () => {
       const customWorkflow = new WorkflowService({
         ...classicPreset(),
         versioning: {
           ...classicPreset().versioning,
           enabled: true,
-          initialVersion: "2.0.0",
-          branchVersion: {
-            enabled: true,
-            patterns: ["release/v{{version}}"],
-            fallback: "initialVersion",
-          },
+          currentVersion: "2.0.0",
+          // default source chain ["branch", "tag"]: "branch" won't match,
+          // "tag" finds nothing either (no tags) — resolveCurrentVersion
+          // returns undefined, so this is treated as the very first
+          // release and the seed is used as-is (not bumped).
+          branchVersion: { patterns: ["release/v{{version}}"] },
         },
       });
       const git = fakeGit({
@@ -334,10 +328,7 @@ describe("FinishBranchUseCase", () => {
         listTags: async () => [],
       });
       let createdTag: string | undefined;
-      const gitWithTagCapture = {
-        ...git,
-        createTag: async (name: string) => void (createdTag = name),
-      };
+      const gitWithTagCapture = { ...git, createTag: async (name: string) => void (createdTag = name) };
 
       const useCase = new FinishBranchUseCase(
         customWorkflow,
@@ -347,24 +338,20 @@ describe("FinishBranchUseCase", () => {
         memoryStateStore(),
       );
 
-      // "release" bumps minor per classicPreset -> 2.0.0 becomes v2.1.0
       const result = await useCase.execute({ kind: "start", branch: "release/no-version-here" });
 
-      expect(createdTag).toBe("v2.1.0");
-      expect(result.tag).toBe("v2.1.0");
+      expect(createdTag).toBe("v2.0.0");
+      expect(result.tag).toBe("v2.0.0");
     });
 
-    it('throws when the branch matches no pattern and fallback is "error"', async () => {
+    it('throws when nothing resolves and "error" is in versioning.tagSource', async () => {
       const customWorkflow = new WorkflowService({
         ...classicPreset(),
         versioning: {
           ...classicPreset().versioning,
           enabled: true,
-          branchVersion: {
-            enabled: true,
-            patterns: ["release/v{{version}}"],
-            fallback: "error",
-          },
+          tagSource: ["branch", "error"],
+          branchVersion: { patterns: ["release/v{{version}}"] },
         },
       });
       const git = fakeGit({
@@ -381,13 +368,88 @@ describe("FinishBranchUseCase", () => {
 
       await expect(
         useCase.execute({ kind: "start", branch: "release/no-version-here" }),
-      ).rejects.toThrow(/branchVersion\.patterns/);
+      ).rejects.toThrow(/versioning\.tagSource/);
+    });
+
+    it('reads the current version from .gitwe/version.yaml when tagSource includes "config"', async () => {
+      const dir = await mkdtemp(join(tmpdir(), "gitwe-file-source-"));
+      try {
+        await mkdir(join(dir, ".gitwe"), { recursive: true });
+        await writeFile(join(dir, ".gitwe/version.yaml"), "currentVersion: 3.4.0\n", "utf8");
+
+        const customWorkflow = new WorkflowService({
+          ...classicPreset(),
+          versioning: { ...classicPreset().versioning, enabled: true, tagSource: ["config"] },
+        });
+        const git = fakeGit({
+          cwd: dir,
+          branchExists: async (b) => new Set(["main", "develop", "release/x"]).has(b),
+          raw: async (args: string[]) => {
+            if (args[0] === "cat-file") return readFile(args[2] as string, "utf8");
+            return "";
+          },
+        });
+        let createdTag: string | undefined;
+        const gitWithTagCapture = {
+          ...git,
+          createTag: async (name: string) => void (createdTag = name),
+        };
+
+        const useCase = new FinishBranchUseCase(
+          customWorkflow,
+          gitWithTagCapture,
+          noopHooks,
+          silentLogger,
+          memoryStateStore(),
+        );
+
+        // "release" bumps minor -> 3.4.0 becomes v3.5.0
+        const result = await useCase.execute({ kind: "start", branch: "release/x" });
+
+        expect(createdTag).toBe("v3.5.0");
+        expect(result.tag).toBe("v3.5.0");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('prompts interactively when tagSource includes "manual" and nothing else resolves', async () => {
+      const customWorkflow = new WorkflowService({
+        ...classicPreset(),
+        versioning: { ...classicPreset().versioning, enabled: true, tagSource: ["manual"] },
+      });
+      const git = fakeGit({
+        branchExists: async (b) => new Set(["main", "develop", "release/x"]).has(b),
+        listTags: async () => [],
+      });
+      let createdTag: string | undefined;
+      const gitWithTagCapture = { ...git, createTag: async (name: string) => void (createdTag = name) };
+
+      const prompter = {
+        isAvailable: () => true,
+        promptVersion: async () => "5.0.0",
+      };
+
+      const useCase = new FinishBranchUseCase(
+        customWorkflow,
+        gitWithTagCapture,
+        noopHooks,
+        silentLogger,
+        memoryStateStore(),
+        prompter,
+      );
+
+      // "release" bumps minor -> 5.0.0 becomes v5.1.0
+      const result = await useCase.execute({ kind: "start", branch: "release/x" });
+
+      expect(createdTag).toBe("v5.1.0");
+      expect(result.tag).toBe("v5.1.0");
     });
   });
 
   // ---- versioning.targets ------------------------------------------------
 
-  describe("versioning.targets", () => {
+  describe("versioning.targetVersion", () => {
     let dir: string;
 
     beforeEach(async () => {
@@ -397,9 +459,13 @@ describe("FinishBranchUseCase", () => {
         JSON.stringify({ name: "demo", version: "0.34.0" }, null, 2) + "\n",
         "utf8",
       );
-      await writeFile(join(dir, "src-version.ts"), "export const version = '0.34.0';\n", "utf8");
+      await writeFile(
+        join(dir, "src-version.ts"),
+        "export const version = '0.34.0';\n",
+        "utf8",
+      );
       await mkdir(join(dir, ".gitwe"), { recursive: true });
-      await writeFile(join(dir, ".gitwe/version.yaml"), "version: 1\n", "utf8");
+      await writeFile(join(dir, ".gitwe/version.yaml"), "currentVersion: 0.34.0\n", "utf8");
     });
 
     afterEach(async () => {
@@ -413,7 +479,7 @@ describe("FinishBranchUseCase", () => {
           ...classicPreset().versioning,
           enabled: true,
           autoCommit: true,
-          targets: [
+          targetVersion: [
             { file: "package.json", path: "version" },
             { file: "src-version.ts", pattern: "export const version = '{{version}}';" },
           ],
@@ -451,6 +517,11 @@ describe("FinishBranchUseCase", () => {
 
       const versionTs = await readFile(join(dir, "src-version.ts"), "utf8");
       expect(versionTs).toBe("export const version = '0.35.0';\n");
+
+      const versionYaml = yaml.load(
+        await readFile(join(dir, ".gitwe/version.yaml"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(versionYaml.currentVersion).toBe("0.35.0");
     });
   });
 });

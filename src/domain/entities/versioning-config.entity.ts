@@ -20,31 +20,18 @@ export interface VersionTargetConfig {
   pattern?: string;
 }
 
-/** What to do when the current branch doesn't match any `branchVersion.patterns`. */
-export type BranchVersionFallback = "bumpRules" | "initialVersion" | "error";
-
 /**
  * Extracts the release version directly from the branch name (e.g.
- * "release/v1.2.0") instead of (or in addition to) computing it from
- * `bumpRules`.
+ * "release/v1.2.0"). Only consulted when `"branch"` appears in
+ * `versioning.tagSource`.
  */
 export interface BranchVersionConfig {
-  enabled: boolean;
   /**
    * Templates containing a single "{{version}}" placeholder, tried in
    * order against the branch name. The first one that matches — and whose
    * captured text parses as a valid semantic version — wins.
    */
   patterns: readonly string[];
-  /**
-   * Strategy used when `enabled` is true but the branch name doesn't match
-   * any pattern. Defaults to "bumpRules".
-   *  - "bumpRules": ignore branchVersion and fall back to the normal
-   *    tag-discovery + bumpRules calculation.
-   *  - "initialVersion": use `versioning.initialVersion` as the version.
-   *  - "error": throw a validation error.
-   */
-  fallback?: BranchVersionFallback;
   /**
    * When true, a leading `tagPrefix` (e.g. "v") found in the text captured
    * for "{{version}}" is stripped before parsing it as a semantic version.
@@ -61,7 +48,31 @@ export interface BranchVersionConfig {
   overrideBumpRules?: boolean;
 }
 
-// domain/entities/versioning-config.entity.ts (جدید)
+/**
+ * Where gitwe can get the "current version" baseline for a release from.
+ * Tried in the order listed in `versioning.tagSource`; the first one that
+ * resolves a value wins.
+ *  - "branch": extract it from the branch name via `branchVersion.patterns`.
+ *  - "config": read the `currentVersion` field out of `.gitwe/version.yaml`.
+ *  - "tag": scan existing `${tagPrefix}X.Y.Z` git tags for the highest one.
+ *  - "manual": prompt the user interactively (skipped when not in a TTY).
+ *  - "error": stop and fail immediately, instead of falling through to the
+ *    `versioning.currentVersion` seed / timestamp fallback.
+ */
+export type TagSource = "branch" | "config" | "tag" | "manual" | "error";
+
+/**
+ * Governs prerelease (`-alpha.1`, `-beta.2`, ...) bumps. Lives at
+ * `versioning.bumpRules.prerelease`, alongside the major/minor/patch rules.
+ */
+export interface PrereleaseBumpConfig {
+  enabled: boolean;
+  /** Branch type names that trigger a prerelease bump (e.g. ["alpha"]). */
+  branchType: readonly string[];
+  format: string;
+  types: readonly string[];
+}
+
 export interface VersioningConfig {
   enabled: boolean;
   config?: string;
@@ -72,7 +83,7 @@ export interface VersioningConfig {
     major?: readonly string[];
     minor?: readonly string[];
     patch?: readonly string[];
-    prerelease?: readonly string[];
+    prerelease?: PrereleaseBumpConfig;
   };
   format?: string;
   annotated?: boolean;
@@ -82,18 +93,22 @@ export interface VersioningConfig {
   autoCommit?: boolean;
   commitMessage?: string;
   /**
-   * Version to start from when versioning is enabled, no --current-version
-   * was given, and no existing "${tagPrefix}X.Y.Z" tag can be found (i.e.
-   * this is the very first release). Defaults to "0.1.0".
+   * The persisted "current version" of the project — both the seed value
+   * used the very first time a release is cut (when no tag exists yet and
+   * no other source resolves a version) and the field gitwe rewrites in
+   * `.gitwe/version.yaml` (key `currentVersion`) after every bump, so this
+   * file always reflects the latest released version. Defaults to "0.1.0".
    */
-  initialVersion?: string;
-  prerelease?: {
-    enabled: boolean;
-    format: string;
-    types: readonly string[];
-  };
+  currentVersion?: string;
+  /**
+   * Ordered list of strategies gitwe tries to determine the "current
+   * version" baseline for a release; the first one that resolves a value
+   * wins. Defaults to `["branch", "tag"]`. See {@link TagSource}.
+   * Ignored when `--current-version` is passed explicitly on the CLI.
+   */
+  tagSource?: readonly TagSource[];
   /** Files to update (in addition to the tag) whenever the version is bumped. */
-  targets?: readonly VersionTargetConfig[];
+  targetVersion?: readonly VersionTargetConfig[];
   /** Extract the release version from the branch name instead of/alongside bumpRules. */
   branchVersion?: BranchVersionConfig;
 }
@@ -106,11 +121,4 @@ export interface VersioningFullConfig extends VersioningConfig {
   pushTags?: boolean;
   autoCommit?: boolean;
   commitMessage?: string;
-  prerelease?: PrereleaseConfig;
-}
-
-export interface PrereleaseConfig {
-  enabled: boolean;
-  format: string;
-  types: readonly string[];
 }

@@ -3,10 +3,20 @@ version: 1
 
 currentVersion: "0.1.0"
 
-tagSource: [branch, file, tag, manual, error]
+tagSource:
+  - branch
+  - config
+  - tag
+  - manual
+  - error
 
-tagTypes: [release, hotfix]
-tagTargets: [root] # root = no base on baseBranches
+tagTypes:
+  - release
+  - hotfix
+
+tagTargets:
+  - root # root = no base on baseBranches
+
 tagPrefix: v
 format: "{{tagPrefix}}{{major}}.{{minor}}.{{patch}}" # {{#if prerelease}}-{{prerelease}}{{/if}}"
 
@@ -14,21 +24,25 @@ annotated: true
 autoCommit: true
 commitMessage: "chore: bump version to {{version}}"
 
-sign: false
-pushTags: false
+sign: true
+pushTags: true
 
 bumpRules:
   major: []
-  minor: ["release"]
-  patch: ["hotfix"]
-  prerelease: []
+  minor:
+    - release
+  patch:
+    - hotfix
+  prerelease:
+    enabled: false
+    branchType: []
+    format: "{{type}}.{{number}}"
+    types:
+      - alpha
+      - beta
+      - rc
 
-prerelease:
-  enabled: false
-  format: "{{type}}.{{number}}"
-  types: ["alpha", "beta", "rc"]
-
-targets:
+targetVersion:
   - file: package.json
     path: version
   - file: src/version.ts
